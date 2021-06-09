@@ -16,7 +16,9 @@ const momaAddress = '0xB72842D6F5feDf91D22d56202802Bb9A79C6322E';
 const bnbAddress = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
 const lpAddress = '0x94e47b2c97781d506E00775787c815481A307F21';
 const lpFarm6Address = '0x01A2cE7925dc8E07F23a3Fd5677040811809066b';
+const vesting6Address = '0xC4a3829ECDbE8EEc07052D9631a6B52ea5deA60E';
 const lpFarm3Address = '0x939351f1274F3b6af210fbbbc839e45D274A0B8C';
+const vesting3Address = '0x4Bd704172f500e96d15b4f388113529dEE81049c';
 const lpFarm0Address = '0x4eaDA50Ce6f570393967314d8550a0Ec5BC54c80';
 const singleFarmAddress = '0xf84718a7B515124009A5B53F0e8c763935FeEb82';
 
@@ -58,7 +60,6 @@ router.get('/share/momafarming/lp/:amount', async (req, res, next) => {
 const momaToLP = async (amount) => {
   const pair = new web3.eth.Contract(Pair.abi, lpAddress);
   const totalLPSupply = await pair.methods.totalSupply().call();
-  console.log({ totalLPSupply });
   const reserves = await pair.methods.getReserves().call();
   const token0 = await pair.methods.token0().call();
   let momaAmount = amount / 2;
@@ -83,6 +84,27 @@ const momaToLP = async (amount) => {
   return { lpAmount, momaAmount, bnbAmount };
 };
 
+const lpToMoma = async (lpAmount) => {
+  const pair = new web3.eth.Contract(Pair.abi, lpAddress);
+  const totalLPSupply = await pair.methods.totalSupply().call();
+  const reserves = await pair.methods.getReserves().call();
+  const token0 = await pair.methods.token0().call();
+  let momaInPool, bnbInPool;
+
+  if (token0.toLowerCase() !== momaAddress.toLowerCase()) {
+    momaInPool = parseInt(reserves[1]);
+    bnbInPool = parseInt(reserves[0]);
+  } else {
+    momaInPool = parseInt(reserves[0]);
+    bnbInPool = parseInt(reserves[1]);
+  }
+
+  const momaAmount = ((lpAmount * 1e18 * momaInPool) / totalLPSupply / 1e18).toFixed(5);
+  const bnbAmount = ((lpAmount * 1e18 * bnbInPool) / totalLPSupply / 1e18).toFixed(5);
+
+  return { momaAmount, bnbAmount };
+};
+
 router.get('/share/momafarming/moma/:amount', async (req, res, next) => {
   try {
     const amount = req.params.amount * 1e18;
@@ -96,9 +118,9 @@ router.get('/share/momafarming/moma/:amount', async (req, res, next) => {
   }
 });
 
-const rewardPerBlockSingle = async (farmingAddress) => {
+const rewardPerBlockSingle = async () => {
   const currentBlock = await web3.eth.getBlockNumber();
-  const farm = new web3.eth.Contract(MomaFarm.abi, farmingAddress);
+  const farm = new web3.eth.Contract(MomaFarm.abi, singleFarmAddress);
   const multiplier = await farm.methods.getMultiplier(currentBlock, currentBlock + 1).call();
   const rewardPerBlock = await farm.methods.momaPerBlock().call();
   return (rewardPerBlock * multiplier) / 1e30;
@@ -114,11 +136,63 @@ const rewardPerBlockLP = async (farmingAddress) => {
 
 router.get('/rewardperblock', async (req, res, next) => {
   try {
-    const moma_single = await rewardPerBlockSingle(singleFarmAddress);
+    const moma_single = await rewardPerBlockSingle();
     const moma_farming6 = await rewardPerBlockLP(lpFarm6Address);
     const moma_farming3 = await rewardPerBlockLP(lpFarm3Address);
     const moma_farming0 = await rewardPerBlockLP(lpFarm0Address);
     return res.send({ moma_single, moma_farming6, moma_farming3, moma_farming0 });
+  } catch (error) {
+    return res.status(404).send('Not Found');
+  }
+});
+
+const getSingleFarmInfo = async (user) => {
+  const farm = new web3.eth.Contract(MomaFarm.abi, singleFarmAddress);
+  const userInfo = await farm.methods.userInfo(user).call();
+  const deposited = (userInfo.amount / 1e18).toFixed(5);
+  const harvestable = (parseInt(await farm.methods.pendingMoma(user).call()) / 1e18).toFixed(5);
+
+  return { deposited, harvestable };
+};
+
+const getLPFarmInfo = async (farmingAddress, vestingAddress, user, isVesting) => {
+  const farm = new web3.eth.Contract(Farm.abi, farmingAddress);
+
+  const userInfo = await farm.methods.userInfo(user).call();
+  const deposited = (userInfo.amount / 1e18).toFixed(5);
+  const harvestable = (parseInt(await farm.methods.pendingReward(user).call()) / 1e18).toFixed(5);
+  let locked = 0;
+  let claimable = 0;
+  if (isVesting) {
+    const vesting = new web3.eth.Contract(Vesting.abi, vestingAddress);
+    locked = (parseInt(await vesting.methods.getTotalAmountLockedByUser(user).call()) / 1e18).toFixed(5);
+    claimable = (parseInt(await vesting.methods.getVestingTotalClaimableAmount(user).call()) / 1e18).toFixed(5);
+  }
+
+  const { momaAmount, bnbAmount } = await lpToMoma(deposited);
+  const lp = {
+    deposited,
+    moma: momaAmount,
+    bnb: bnbAmount,
+  };
+  return { lp, harvestable, locked, claimable };
+};
+
+router.get('/wallet/:address', async (req, res, next) => {
+  try {
+    const address = req.params.address;
+    if (!web3.utils.isAddress(address)) return res.send('Invalid Address');
+    const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
+    const momaInWallet = (parseInt(await moma.methods.balanceOf(address).call()) / 1e18).toFixed(5);
+    console.log({ momaInWallet });
+
+    const singleFarm = await getSingleFarmInfo(address);
+
+    const lpFarm6 = await getLPFarmInfo(lpFarm6Address, vesting6Address, address, true);
+    const lpFarm3 = await getLPFarmInfo(lpFarm3Address, vesting3Address, address, true);
+    const lpFarm0 = await getLPFarmInfo(lpFarm0Address, '', address, false);
+
+    return res.send({ singleFarm, lpFarm6, lpFarm3, lpFarm0 });
   } catch (error) {
     return res.status(404).send('Not Found');
   }
