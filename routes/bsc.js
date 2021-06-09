@@ -55,11 +55,11 @@ router.get('/share/momafarming/lp/:amount', async (req, res, next) => {
   }
 });
 
-const momaToLP = async (farmingAddress, amount) => {
+const momaToLP = async (amount) => {
   const pair = new web3.eth.Contract(Pair.abi, lpAddress);
-  const totalLPInPool = await pair.methods.balanceOf(farmingAddress).call();
+  const totalLPSupply = await pair.methods.totalSupply().call();
+  console.log({ totalLPSupply });
   const reserves = await pair.methods.getReserves().call();
-  console.log({ reserves });
   const token0 = await pair.methods.token0().call();
   let momaAmount = amount / 2;
   let lpAmount, bnbAmount;
@@ -68,29 +68,29 @@ const momaToLP = async (farmingAddress, amount) => {
     const momaInPool = parseInt(reserves[1]);
     const bnbInPool = parseInt(reserves[0]);
     bnbAmount = (momaAmount * bnbInPool) / momaInPool;
-    lpAmount = (momaAmount * totalLPInPool) / momaInPool;
+    lpAmount = (momaAmount * totalLPSupply) / momaInPool;
   } else {
     const momaInPool = parseInt(reserves[0]);
     const bnbInPool = parseInt(reserves[1]);
     bnbAmount = (momaAmount * bnbInPool) / momaInPool;
-    lpAmount = (momaAmount * totalLPInPool) / momaInPool;
+    lpAmount = (momaAmount * totalLPSupply) / momaInPool;
   }
 
-  const share = ((lpAmount / (totalLPInPool + lpAmount)) * 100).toFixed(5);
   lpAmount = (lpAmount / 1e18).toFixed(5);
   momaAmount = (momaAmount / 1e18).toFixed(5);
   bnbAmount = (bnbAmount / 1e18).toFixed(5);
 
-  return { share, lpAmount, momaAmount, bnbAmount };
+  return { lpAmount, momaAmount, bnbAmount };
 };
 
 router.get('/share/momafarming/moma/:amount', async (req, res, next) => {
   try {
     const amount = req.params.amount * 1e18;
-    const momaFarming6 = await momaToLP(lpFarm6Address, amount);
-    const momaFarming3 = await momaToLP(lpFarm3Address, amount);
-    const momaFarming0 = await momaToLP(lpFarm0Address, amount);
-    return res.send({ momaFarming6, momaFarming3, momaFarming0 });
+    const { lpAmount, momaAmount, bnbAmount } = await momaToLP(amount);
+    const momaFarming6Share = await percentInLPFarm(lpFarm6Address, lpAmount * 1e18);
+    const momaFarming3Share = await percentInLPFarm(lpFarm3Address, lpAmount * 1e18);
+    const momaFarming0Share = await percentInLPFarm(lpFarm0Address, lpAmount * 1e18);
+    return res.send({ lpAmount, momaAmount, bnbAmount, momaFarming6Share, momaFarming3Share, momaFarming0Share });
   } catch (error) {
     return res.status(404).send('Not Found');
   }
@@ -109,7 +109,6 @@ const rewardPerBlockLP = async (farmingAddress) => {
   const farm = new web3.eth.Contract(Farm.abi, farmingAddress);
   const multiplier = await farm.methods.getMultiplier(currentBlock, currentBlock + 1).call();
   const rewardPerBlock = await farm.methods.rewardPerBlock().call();
-  console.log(rewardPerBlock * multiplier);
   return (rewardPerBlock * multiplier) / 1e30;
 };
 
