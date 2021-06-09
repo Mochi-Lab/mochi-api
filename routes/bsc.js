@@ -165,9 +165,12 @@ const getLPFarmInfo = async (farmingAddress, vestingAddress, user, isVesting) =>
   let claimable = 0;
   if (isVesting) {
     const vesting = new web3.eth.Contract(Vesting.abi, vestingAddress);
-    locked = (parseInt(await vesting.methods.getTotalAmountLockedByUser(user).call()) / 1e18).toFixed(5);
-    claimable = (parseInt(await vesting.methods.getVestingTotalClaimableAmount(user).call()) / 1e18).toFixed(5);
+    locked = await vesting.methods.getTotalAmountLockedByUser(user).call();
+    claimable = await vesting.methods.getVestingTotalClaimableAmount(user).call();
   }
+
+  locked = (locked / 1e18).toFixed(5);
+  claimable = (claimable / 1e18).toFixed(5);
 
   const { momaAmount, bnbAmount } = await lpToMoma(deposited);
   const lp = {
@@ -184,7 +187,6 @@ router.get('/wallet/:address', async (req, res, next) => {
     if (!web3.utils.isAddress(address)) return res.send('Invalid Address');
     const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
     const momaInWallet = (parseInt(await moma.methods.balanceOf(address).call()) / 1e18).toFixed(5);
-    console.log({ momaInWallet });
 
     const singleFarm = await getSingleFarmInfo(address);
 
@@ -192,7 +194,7 @@ router.get('/wallet/:address', async (req, res, next) => {
     const lpFarm3 = await getLPFarmInfo(lpFarm3Address, vesting3Address, address, true);
     const lpFarm0 = await getLPFarmInfo(lpFarm0Address, '', address, false);
 
-    return res.send({ singleFarm, lpFarm6, lpFarm3, lpFarm0 });
+    return res.send({ momaInWallet, singleFarm, lpFarm6, lpFarm3, lpFarm0 });
   } catch (error) {
     return res.status(404).send('Not Found');
   }
