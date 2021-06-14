@@ -149,10 +149,13 @@ router.get('/rewardperblock', async (req, res, next) => {
 const getSingleFarmInfo = async (user) => {
   const farm = new web3.eth.Contract(MomaFarm.abi, singleFarmAddress);
   const userInfo = await farm.methods.userInfo(user).call();
+  const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
+  const totalMomaInPool = parseInt(await moma.methods.balanceOf(singleFarmAddress).call());
   const deposited = (userInfo.amount / 1e18).toFixed(5);
+  const share = ((deposited * 1e18 * 100) / (totalMomaInPool + deposited * 1e18)).toFixed(5);
   const harvestable = (parseInt(await farm.methods.pendingMoma(user).call()) / 1e18).toFixed(5);
 
-  return { deposited, harvestable };
+  return { share, deposited, harvestable };
 };
 
 const getLPFarmInfo = async (farmingAddress, vestingAddress, user, isVesting) => {
@@ -173,7 +176,9 @@ const getLPFarmInfo = async (farmingAddress, vestingAddress, user, isVesting) =>
   claimable = (claimable / 1e18).toFixed(5);
 
   const { momaAmount, bnbAmount } = await lpToMoma(deposited);
+  const share = await percentInLPFarm(farmingAddress, parseInt(userInfo.amount));
   const lp = {
+    share,
     deposited,
     moma: momaAmount,
     bnb: bnbAmount,
