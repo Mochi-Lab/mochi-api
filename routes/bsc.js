@@ -152,7 +152,7 @@ const getSingleFarmInfo = async (user) => {
   const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
   const totalMomaInPool = parseInt(await moma.methods.balanceOf(singleFarmAddress).call());
   const deposited = (userInfo.amount / 1e18).toFixed(5);
-  const share = ((deposited * 1e18 * 100) / (totalMomaInPool + deposited * 1e18)).toFixed(5);
+  const share = ((deposited * 1e18 * 100) / totalMomaInPool).toFixed(5);
   const harvestable = (parseInt(await farm.methods.pendingMoma(user).call()) / 1e18).toFixed(5);
 
   return { share, deposited, harvestable };
@@ -176,7 +176,9 @@ const getLPFarmInfo = async (farmingAddress, vestingAddress, user, isVesting) =>
   claimable = (claimable / 1e18).toFixed(5);
 
   const { momaAmount, bnbAmount } = await lpToMoma(deposited);
-  const share = await percentInLPFarm(farmingAddress, parseInt(userInfo.amount));
+  const lpToken = new web3.eth.Contract(ERC20.abi, lpAddress);
+  const totalLPInPool = parseInt(await lpToken.methods.balanceOf(farmingAddress).call());
+  const share = ((parseInt(userInfo.amount) / totalLPInPool) * 100).toFixed(5);
   const lp = {
     share,
     deposited,
