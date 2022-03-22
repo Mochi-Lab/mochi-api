@@ -6,6 +6,7 @@ const Farm = require('../contracts/farm/Farm.json');
 const MomaFarm = require('../contracts/farm/MomaFarm.json');
 const Vesting = require('../contracts/farm/Vesting.json');
 const Pair = require('../contracts/UniswapV2Pair.json');
+const PadStaking = require('../contracts/farm/PadStaking.json');
 
 const Web3 = require('web3');
 const { ethers } = require('ethers');
@@ -21,6 +22,7 @@ const lpFarm3Address = '0x939351f1274F3b6af210fbbbc839e45D274A0B8C';
 const vesting3Address = '0x4Bd704172f500e96d15b4f388113529dEE81049c';
 const lpFarm0Address = '0x4eaDA50Ce6f570393967314d8550a0Ec5BC54c80';
 const singleFarmAddress = '0xf84718a7B515124009A5B53F0e8c763935FeEb82';
+const padStakingAddress = '0x740819bE4a397Ddb9fE45Ea5637AA467DbAC7fAc';
 
 router.get('/', function (req, res, next) {
   res.send('respond with a resource');
@@ -31,6 +33,18 @@ router.get('/share/momasingle/:amount', async (req, res, next) => {
     const amount = req.params.amount * 1e18;
     const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
     const totalMomaInPool = parseInt(await moma.methods.balanceOf(singleFarmAddress).call());
+    const percentInPool = ((amount / (totalMomaInPool + amount)) * 100).toFixed(5);
+    return res.send(percentInPool);
+  } catch (error) {
+    return res.status(404).send('Not Found');
+  }
+});
+
+router.get('/share/pad/:amount', async (req, res, next) => {
+  try {
+    const amount = req.params.amount * 1e18;
+    const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
+    const totalMomaInPool = parseInt(await moma.methods.balanceOf(padStakingAddress).call());
     const percentInPool = ((amount / (totalMomaInPool + amount)) * 100).toFixed(5);
     return res.send(percentInPool);
   } catch (error) {
@@ -126,6 +140,14 @@ const rewardPerBlockSingle = async () => {
   return (rewardPerBlock * multiplier) / 1e30;
 };
 
+const rewardPerBlockPad = async () => {
+  const currentBlock = await web3.eth.getBlockNumber();
+  const farm = new web3.eth.Contract(PadStaking.abi, singleFarmAddress);
+  const multiplier = await farm.methods.getMultiplier(currentBlock, currentBlock + 1).call();
+  const rewardPerBlock = await farm.methods.momaPerBlock().call();
+  return (rewardPerBlock * multiplier) / 1e30;
+};
+
 const rewardPerBlockLP = async (farmingAddress) => {
   const currentBlock = await web3.eth.getBlockNumber();
   const farm = new web3.eth.Contract(Farm.abi, farmingAddress);
@@ -137,10 +159,11 @@ const rewardPerBlockLP = async (farmingAddress) => {
 router.get('/rewardperblock', async (req, res, next) => {
   try {
     const moma_single = await rewardPerBlockSingle();
+    const pad_staking = await rewardPerBlockPad();
     const moma_farming6 = await rewardPerBlockLP(lpFarm6Address);
     const moma_farming3 = await rewardPerBlockLP(lpFarm3Address);
     const moma_farming0 = await rewardPerBlockLP(lpFarm0Address);
-    return res.send({ moma_single, moma_farming6, moma_farming3, moma_farming0 });
+    return res.send({ moma_single, pad_staking, moma_farming6, moma_farming3, moma_farming0 });
   } catch (error) {
     return res.status(404).send('Not Found');
   }
@@ -154,6 +177,21 @@ const getSingleFarmInfo = async (user) => {
   const deposited = (userInfo.amount / 1e18).toFixed(5);
   const share = ((deposited * 1e18 * 100) / totalMomaInPool).toFixed(5);
   const harvestable = (parseInt(await farm.methods.pendingMoma(user).call()) / 1e18).toFixed(5);
+
+  return { share, deposited, harvestable };
+};
+
+const getPadStakingInfo = async (user) => {
+  const padStaking = new web3.eth.Contract(PadStaking.abi, padStakingAddress);
+  const userInfo = await padStaking.methods.userInfo(user).call();
+  const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
+  const totalMomaInPool = parseInt(await moma.methods.balanceOf(padStakingAddress).call());
+  const deposited = (userInfo.amount / 1e18).toFixed(5);
+  const share = ((deposited * 1e18 * 100) / totalMomaInPool).toFixed(5);
+  console.log('hehe3');
+
+  const harvestable = (parseInt(await padStaking.methods.pendingMoma(user).call()) / 1e18).toFixed(5);
+  console.log('hehe4');
 
   return { share, deposited, harvestable };
 };
@@ -190,18 +228,21 @@ const getLPFarmInfo = async (farmingAddress, vestingAddress, user, isVesting) =>
 
 router.get('/wallet/:address', async (req, res, next) => {
   try {
-    const address = req.params.address;
+    const address = req.params.address.toLowerCase();
     if (!web3.utils.isAddress(address)) return res.send('Invalid Address');
     const moma = new web3.eth.Contract(ERC20.abi, momaAddress);
     const momaInWallet = (parseInt(await moma.methods.balanceOf(address).call()) / 1e18).toFixed(5);
-
+    console.log('hehe');
     const singleFarm = await getSingleFarmInfo(address);
+    console.log('hehe2');
+    const padStaking = await getPadStakingInfo(address);
+    console.log('hehe3');
 
     const lpFarm6 = await getLPFarmInfo(lpFarm6Address, vesting6Address, address, true);
     const lpFarm3 = await getLPFarmInfo(lpFarm3Address, vesting3Address, address, true);
     const lpFarm0 = await getLPFarmInfo(lpFarm0Address, '', address, false);
 
-    return res.send({ momaInWallet, singleFarm, lpFarm6, lpFarm3, lpFarm0 });
+    return res.send({ momaInWallet, singleFarm, padStaking, lpFarm6, lpFarm3, lpFarm0 });
   } catch (error) {
     return res.status(404).send('Not Found');
   }
